@@ -32,7 +32,7 @@ services:
       retries: 5
 
   migrations:
-    image: gcr.io/essential-app-380501/resolveml-edge-setup:latest
+    image: relvy/relvy-app-trial:latest
     platform: linux/amd64
     command: ["/bin/sh", "-c", "/app/wait-for-db.sh db flask --app=resolveml db upgrade"]
     networks:
@@ -56,7 +56,7 @@ services:
         condition: service_healthy
 
   setup:
-    image: gcr.io/essential-app-380501/resolveml-edge-setup:latest
+    image: relvy/relvy-app-trial:latest
     platform: linux/amd64
     command: ["/bin/sh", "-c", "/app/wait-for-db.sh db python -m resolveml.one_off_jobs.setup_edge"]
     networks:
@@ -82,7 +82,7 @@ services:
         condition: service_completed_successfully
 
   celery-worker:
-    image: gcr.io/essential-app-380501/resolveml-edge-setup:latest
+    image: relvy/relvy-app-trial:latest
     platform: linux/amd64
     command: ["/bin/sh", "-c", "/app/wait-for-db.sh db celery -A make_celery.celery_app worker --beat --loglevel=INFO --pool=threads --concurrency=4"]
     networks:
@@ -96,8 +96,8 @@ services:
       - REDIS_URL=redis://redis:6379/0
       - PYTHONPATH=/app
       - ENVIRONMENT=edge
-      - SLACK_CLIENT_SECRET=${SLACK_CLIENT_SECRET}
-      - SLACK_CLIENT_ID=${SLACK_CLIENT_ID}
+      - SLACK_CLIENT_SECRET=${SLACK_CLIENT_SECRET:-}
+      - SLACK_CLIENT_ID=${SLACK_CLIENT_ID:-}
       - SERVER_HOSTNAME=${SERVER_HOSTNAME}
       - LANGFUSE_TRACING_ENVIRONMENT=${LANGFUSE_TRACING_ENVIRONMENT:-edge}
       - HTTP_PROXY=http://proxy:3128
@@ -110,7 +110,7 @@ services:
     restart: unless-stopped
 
   web:
-    image: gcr.io/essential-app-380501/resolveml-edge-setup:latest
+    image: relvy/relvy-app-trial:latest
     platform: linux/amd64
     command: ["/bin/sh", "-c", "/app/wait-for-db.sh db gunicorn --bind :8000 --workers 1 --threads 8 --timeout 0 'resolveml:create_app()'"]
     networks:
@@ -126,8 +126,8 @@ services:
       - PORT=8000
       - ENVIRONMENT=edge
       - SERVER_HOSTNAME=${SERVER_HOSTNAME}
-      - SLACK_CLIENT_SECRET=${SLACK_CLIENT_SECRET}
-      - SLACK_CLIENT_ID=${SLACK_CLIENT_ID}
+      - SLACK_CLIENT_SECRET=${SLACK_CLIENT_SECRET:-}
+      - SLACK_CLIENT_ID=${SLACK_CLIENT_ID:-}
       - LANGFUSE_TRACING_ENVIRONMENT=${LANGFUSE_TRACING_ENVIRONMENT:-edge}
       - HTTP_PROXY=http://proxy:3128
       - HTTPS_PROXY=http://proxy:3128
@@ -150,11 +150,9 @@ services:
     entrypoint: ["/bin/sh", "-c"]
     command:
       - |
-          echo "Waiting for Docker DNS entry for web..."
           until getent hosts web; do
             sleep 1
           done
-          echo "web resolved, starting squid"
 
           rm -f /run/squid.pid
           chmod 666 /dev/stdout /dev/stderr 2>/dev/null

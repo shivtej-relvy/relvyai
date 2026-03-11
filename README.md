@@ -29,23 +29,30 @@ Relvy AI executes your plain-language runbooks for on-call and incident response
 
 ## Quick Start
 
-### Step 1 - Start the stack
+### Step 1 - Clone the repo
+
+```bash
+git clone https://github.com/Relvy-AI/relvyai.git
+cd relvyai
+```
+
+### Step 2 - Start the stack
 
 ```bash
 docker compose up -d
 ```
 
-That's it. All services start with sensible defaults - no configuration needed.
+That's it. All services start with sensible defaults — no configuration needed.
 
-### Step 2 - Verify
+> **Relvy will be available at [http://localhost:80](http://localhost:80)** once all services are healthy (typically under a minute).
+
+To check status:
 
 ```bash
 docker compose ps
 ```
 
 `migrations` and `setup` will show as exited (0) after first boot. All other services should be healthy/running.
-
-Open **http://localhost:80** to access the application.
 
 ---
 
