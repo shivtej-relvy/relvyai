@@ -1,0 +1,190 @@
+services:
+  db:
+    image: pgvector/pgvector:pg15
+    hostname: db
+    networks:
+      - internal
+    environment:
+      - POSTGRES_USER=${POSTGRES_USER:-relvy}
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-relvy}
+      - POSTGRES_DB=${POSTGRES_DB:-relvydb}
+    ports:
+      - '5432:5432'
+    volumes:
+      - relvy-pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-relvy} -d ${POSTGRES_DB:-relvydb}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  redis:
+    image: redis:7-alpine
+    hostname: redis
+    networks:
+      - internal
+    ports:
+      - '6379:6379'
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  migrations:
+    image: gcr.io/essential-app-380501/resolveml-edge-setup:latest
+    platform: linux/amd64
+    command: ["/bin/sh", "-c", "/app/wait-for-db.sh db flask --app=resolveml db upgrade"]
+    networks:
+      - internal
+    environment:
+      - DATABASE_URI=postgresql://${POSTGRES_USER:-relvy}:${POSTGRES_PASSWORD:-relvy}@db:5432/${POSTGRES_DB:-relvydb}
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-relvy}
+      - POSTGRES_USER=${POSTGRES_USER:-relvy}
+      - POSTGRES_DB=${POSTGRES_DB:-relvydb}
+      - POSTGRES_ENDPOINT=db
+      - REDIS_URL=redis://redis:6379/0
+      - PYTHONPATH=/app
+      - ENVIRONMENT=edge
+      - HTTP_PROXY=http://proxy:3128
+      - HTTPS_PROXY=http://proxy:3128
+      - NO_PROXY=db,redis,proxy,localhost,127.0.0.1
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+  setup:
+    image: gcr.io/essential-app-380501/resolveml-edge-setup:latest
+    platform: linux/amd64
+    command: ["/bin/sh", "-c", "/app/wait-for-db.sh db python -m resolveml.one_off_jobs.setup_edge"]
+    networks:
+      - internal
+    environment:
+      - DATABASE_URI=postgresql://${POSTGRES_USER:-relvy}:${POSTGRES_PASSWORD:-relvy}@db:5432/${POSTGRES_DB:-relvydb}
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-relvy}
+      - POSTGRES_USER=${POSTGRES_USER:-relvy}
+      - POSTGRES_DB=${POSTGRES_DB:-relvydb}
+      - POSTGRES_ENDPOINT=db
+      - REDIS_URL=redis://redis:6379/0
+      - PYTHONPATH=/app
+      - ENVIRONMENT=edge
+      - HTTP_PROXY=http://proxy:3128
+      - HTTPS_PROXY=http://proxy:3128
+      - NO_PROXY=db,redis,proxy,localhost,127.0.0.1
+      - DEFAULT_USER_EMAIL=${DEFAULT_USER_EMAIL:-admin@relvy.local}
+      - DEFAULT_USER_PASSWORD=${DEFAULT_USER_PASSWORD:-changeme}
+      - DEFAULT_ORG_NAME=${DEFAULT_ORG_NAME:-Default Organization}
+      - LANGFUSE_TRACING_ENVIRONMENT=${LANGFUSE_TRACING_ENVIRONMENT:-edge}
+    depends_on:
+      migrations:
+        condition: service_completed_successfully
+
+  celery-worker:
+    image: gcr.io/essential-app-380501/resolveml-edge-setup:latest
+    platform: linux/amd64
+    command: ["/bin/sh", "-c", "/app/wait-for-db.sh db celery -A make_celery.celery_app worker --beat --loglevel=INFO --pool=threads --concurrency=4"]
+    networks:
+      - internal
+    environment:
+      - DATABASE_URI=postgresql://${POSTGRES_USER:-relvy}:${POSTGRES_PASSWORD:-relvy}@db:5432/${POSTGRES_DB:-relvydb}
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-relvy}
+      - POSTGRES_USER=${POSTGRES_USER:-relvy}
+      - POSTGRES_DB=${POSTGRES_DB:-relvydb}
+      - POSTGRES_ENDPOINT=db
+      - REDIS_URL=redis://redis:6379/0
+      - PYTHONPATH=/app
+      - ENVIRONMENT=edge
+      - SLACK_CLIENT_SECRET=${SLACK_CLIENT_SECRET}
+      - SLACK_CLIENT_ID=${SLACK_CLIENT_ID}
+      - SERVER_HOSTNAME=${SERVER_HOSTNAME}
+      - LANGFUSE_TRACING_ENVIRONMENT=${LANGFUSE_TRACING_ENVIRONMENT:-edge}
+      - HTTP_PROXY=http://proxy:3128
+      - HTTPS_PROXY=http://proxy:3128
+      - NO_PROXY=db,redis,web,celery-worker,proxy,localhost,127.0.0.1
+      - OPENAI_TOKEN=${OPENAI_TOKEN}
+    depends_on:
+      setup:
+        condition: service_completed_successfully
+    restart: unless-stopped
+
+  web:
+    image: gcr.io/essential-app-380501/resolveml-edge-setup:latest
+    platform: linux/amd64
+    command: ["/bin/sh", "-c", "/app/wait-for-db.sh db gunicorn --bind :8000 --workers 1 --threads 8 --timeout 0 'resolveml:create_app()'"]
+    networks:
+      - internal
+    environment:
+      - DATABASE_URI=postgresql://${POSTGRES_USER:-relvy}:${POSTGRES_PASSWORD:-relvy}@db:5432/${POSTGRES_DB:-relvydb}
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-relvy}
+      - POSTGRES_USER=${POSTGRES_USER:-relvy}
+      - POSTGRES_DB=${POSTGRES_DB:-relvydb}
+      - POSTGRES_ENDPOINT=db
+      - REDIS_URL=redis://redis:6379/0
+      - PYTHONPATH=/app
+      - PORT=8000
+      - ENVIRONMENT=edge
+      - SERVER_HOSTNAME=${SERVER_HOSTNAME}
+      - SLACK_CLIENT_SECRET=${SLACK_CLIENT_SECRET}
+      - SLACK_CLIENT_ID=${SLACK_CLIENT_ID}
+      - LANGFUSE_TRACING_ENVIRONMENT=${LANGFUSE_TRACING_ENVIRONMENT:-edge}
+      - HTTP_PROXY=http://proxy:3128
+      - HTTPS_PROXY=http://proxy:3128
+      - NO_PROXY=db,redis,web,celery-worker,proxy,localhost,127.0.0.1
+      - OPENAI_TOKEN=${OPENAI_TOKEN}
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://localhost:8000/health')\""]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+    depends_on:
+      setup:
+        condition: service_completed_successfully
+    restart: unless-stopped
+
+  proxy:
+    image: ubuntu/squid
+    hostname: proxy
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+          echo "Waiting for Docker DNS entry for web..."
+          until getent hosts web; do
+            sleep 1
+          done
+          echo "web resolved, starting squid"
+
+          rm -f /run/squid.pid
+          chmod 666 /dev/stdout /dev/stderr 2>/dev/null
+          exec squid --foreground -f /etc/squid/squid.conf
+    networks:
+      - internal
+      - external
+    volumes:
+      - ./squid.conf:/etc/squid/squid.conf:ro
+    ports:
+      - '80:8080'
+    healthcheck:
+      test: ["CMD-SHELL", "bash -c '</dev/tcp/127.0.0.1/3128'"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    depends_on:
+      web:
+        condition: service_healthy
+    restart: unless-stopped
+
+volumes:
+  relvy-pgdata:
+
+networks:
+  internal:
+    name: relvy-internal
+    driver: bridge
+    internal: true
+  external:
+    name: relvy-external
+    driver: bridge
