@@ -33,7 +33,7 @@ services:
 
   migrations:
     image: relvy/relvy-app-trial:latest
-    platform: linux/amd64
+    pull_policy: always
     command: ["/bin/sh", "-c", "/app/wait-for-db.sh db flask --app=resolveml db upgrade"]
     networks:
       - internal
@@ -57,7 +57,7 @@ services:
 
   setup:
     image: relvy/relvy-app-trial:latest
-    platform: linux/amd64
+    pull_policy: always
     command: ["/bin/sh", "-c", "/app/wait-for-db.sh db python -m resolveml.one_off_jobs.setup_edge"]
     networks:
       - internal
@@ -83,7 +83,7 @@ services:
 
   celery-worker:
     image: relvy/relvy-app-trial:latest
-    platform: linux/amd64
+    pull_policy: always
     command: ["/bin/sh", "-c", "/app/wait-for-db.sh db celery -A make_celery.celery_app worker --beat --loglevel=INFO --pool=threads --concurrency=4"]
     networks:
       - internal
@@ -111,7 +111,7 @@ services:
 
   web:
     image: relvy/relvy-app-trial:latest
-    platform: linux/amd64
+    pull_policy: always
     command: ["/bin/sh", "-c", "/app/wait-for-db.sh db gunicorn --bind :8000 --workers 1 --threads 8 --timeout 0 'resolveml:create_app()'"]
     networks:
       - internal
